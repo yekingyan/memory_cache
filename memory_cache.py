@@ -6,38 +6,37 @@ from functools import wraps
 NEVER_EXPIRE = 0
 
 
-class MemoryCache(object):
-    def __init__(self, nLimitTimeMs=NEVER_EXPIRE, bUniqueArg=True):
-        """
-        根据入参缓存函数调用结果
-        Args:
-            nLimitTimeMs: 最小更新时间间隙, 默认只返回缓存
-            bUniqueArg: 是否区分入参作为更新依据
-        """
-        self.instance = None
-        self.m_nLimitTimeMs = nLimitTimeMs
+class FuncAttr(object):
+    def __init__(self, nExpireMs=NEVER_EXPIRE, bUniqueArg=True):
+
+        self.m_InstanceObj = None
+        self.m_nExpireMs = nExpireMs
         self.m_bUniqueArg = bUniqueArg
 
-        self.arg2res = {}
+        self.dictArg2res = {}
 
     def __get__(self, instance, cls):
-        self.instance = instance
+        self.m_InstanceObj = instance
         return self
 
     def _GetRes(self, key):
-        result, nLastUpdateTs = self.arg2res.get(key, (None, None))
-        return result, nLastUpdateTs
+        result, nCacheExpireTs = self.dictArg2res.get(key, (None, None))
+        return result, nCacheExpireTs
 
     def _IsExpired(self, key):
-        _, nLastUpdateTs = self._GetRes(key)
-        if nLastUpdateTs is None:
+        _, nCacheExpireTs = self._GetRes(key)
+        if nCacheExpireTs is None:
             return True
-        if self.m_nLimitTimeMs == NEVER_EXPIRE:
+        if self.m_nExpireMs == NEVER_EXPIRE:
             return False
-        if (time.time() - nLastUpdateTs) * 1000 > self.m_nLimitTimeMs:
-            return True
-        return False
+        assert isinstance(nCacheExpireTs, (int, float))
+        return time.time() >= nCacheExpireTs
 
+
+class MemoryCache(FuncAttr):
+    """
+    函数缓存装饰器
+    """
     def __call__(self, func):
         @wraps(func)
         def Wrapper(*args, **kwargs):
@@ -46,10 +45,37 @@ class MemoryCache(object):
                 result, _ = self._GetRes(key)
                 return result
 
-            if self.instance is not None:
-                res = func(self.instance, *args, **kwargs)
+            if self.m_InstanceObj is not None:
+                res = func(self.m_InstanceObj, *args, **kwargs)
             else:
                 res = func(*args, **kwargs)
-            self.arg2res[key] = res, time.time()
+            self.dictArg2res[key] = res, time.time() + self.m_nExpireMs / 1000.0
             return res
+        return Wrapper
+
+
+class DelayRun(FuncAttr):
+    """
+    延迟调用装饰器
+    """
+    def __init__(self, nDelayMs=1000, bUniqueArg=True, TickEngine=None):
+        assert nDelayMs > 0
+        super(DelayRun, self).__init__(nDelayMs, bUniqueArg)
+        self.m_TickEngine = TickEngine
+
+    def __call__(self, func):
+        @wraps(func)
+        def Wrapper(*args, **kwargs):
+            key = str((args, kwargs)) if self.m_bUniqueArg else "simple"
+            nTickID, _ = self._GetRes(key)
+            if not self._IsExpired(key) and self.m_TickEngine.IsExistTickID(nTickID):
+                return nTickID
+
+            RegisterOnceTick = self.m_TickEngine.RegisterOnceTick
+            if self.m_InstanceObj is not None:
+                nTickID = RegisterOnceTick("", self.m_nExpireMs, func, self.m_InstanceObj, *args, **kwargs)
+            else:
+                nTickID = RegisterOnceTick("", self.m_nExpireMs, func, *args, **kwargs)
+            self.dictArg2res[key] = nTickID, time.time() + self.m_nExpireMs / 1000.0
+            return nTickID
         return Wrapper

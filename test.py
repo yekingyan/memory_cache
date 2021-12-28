@@ -3,6 +3,8 @@ import unittest
 from time import sleep
 
 from memory_cache import MemoryCache
+from memory_cache import DelayRun
+import tick_mgr
 
 
 class TestMemoryCache(unittest.TestCase):
@@ -29,12 +31,12 @@ class TestMemoryCache(unittest.TestCase):
             return i, j
 
         ls = [0]
-        for _ in xrange(100):
+        for _ in range(100):
             r = a(1)
             self.assertEqual((1, 2), r, u"结果有误")
             self.assertEqual(1, ls[0], u"函数内部触发次数错误")
 
-        for k in xrange(2, 101):
+        for k in range(2, 101):
             r = a(k)
             self.assertEqual((k, 2), r, u"结果有误")
             self.assertEqual(k, ls[0], u"函数内部触发次数错误")
@@ -47,7 +49,7 @@ class TestMemoryCache(unittest.TestCase):
             return i, j
 
         ls = [0]
-        for k in xrange(100):
+        for k in range(100):
             r = a(1)
             self.assertEqual((1, 2), r, u"结果有误, 参数虽不同, 应只缓存第一个结果")
             self.assertEqual(1, ls[0], u"函数内部触发次数错误")
@@ -57,19 +59,19 @@ class TestMemoryCache(unittest.TestCase):
 
     def test3(self):
         """0.1s过期，区分入参"""
-        @MemoryCache(nLimitTimeMs=10)
+        @MemoryCache(nExpireMs=10)
         def a(i, j=2):
             ls[0] += 1
             return i, j
 
         ls = [0]
-        for _ in xrange(1, 101):
+        for _ in range(1, 101):
             r = a(1)
             self.assertEqual((1, 2), r, u"结果有误, 参数相同, 应只缓存第一个结果")
             self.assertEqual(1, ls[0], u"函数内部触发次数错误")
 
         sleep(0.01)
-        for k in xrange(2, 101):
+        for k in range(2, 10):
             r = a(1)
             self.assertEqual((1, 2), r, u"结果有误")
             self.assertEqual(k, ls[0], u"函数内部触发次数错误, 相隔的时间应每次都是新的结果")
@@ -77,19 +79,19 @@ class TestMemoryCache(unittest.TestCase):
 
     def test4(self):
         """0.1s过期，不区分入参"""
-        @MemoryCache(nLimitTimeMs=10, bUniqueArg=False)
+        @MemoryCache(nExpireMs=10, bUniqueArg=False)
         def a(i, j=2):
             ls[0] += 1
             return i, j
 
         ls = [0]
-        for k in xrange(1, 101):
+        for k in range(1, 101):
             r = a(k)
             self.assertEqual((1, 2), r, u"结果有误, 参数相同, 应只缓存第一个结果")
             self.assertEqual(1, ls[0], u"函数内部触发次数错误")
 
         sleep(0.01)
-        for k in xrange(2, 101):
+        for k in range(2, 10):
             r = a(k)
             self.assertEqual((k, 2), r, u"结果有误")
             self.assertEqual(k, ls[0], u"函数内部触发次数错误, 相隔的时间应每次都是新的结果")
@@ -134,7 +136,7 @@ class TestMemoryCache(unittest.TestCase):
         self.assertEqual(2, a2.s_nBCall)
 
         # 参数相同，不会重覆触发
-        for _ in xrange(100):
+        for _ in range(100):
             a1.a(1)
             a2.a(1)
             self.assertEqual(1, a1.m_nACall)
@@ -146,7 +148,7 @@ class TestMemoryCache(unittest.TestCase):
             self.assertEqual(2, a2.s_nBCall)
 
         # 参数不相同，会重覆触发
-        for j in xrange(2, 102):
+        for j in range(2, 102):
             a1.a(j)
             a2.a(j)
             self.assertEqual(j, a1.m_nACall)
@@ -157,3 +159,97 @@ class TestMemoryCache(unittest.TestCase):
             a2.b(1000+j)
             self.assertEqual(2*j, a1.s_nBCall)
             self.assertEqual(2*j, a2.s_nBCall)
+
+
+def DelayRunTest(nDelayMs=0, bUniqueArg=True):
+    return DelayRun(nDelayMs=nDelayMs, bUniqueArg=bUniqueArg, TickEngine=tick_mgr)
+
+
+class TestDelayRun(unittest.TestCase):
+
+    def test1(self):
+        """延迟执行。区分入参, 根据入参间隔时间内只执行一次"""
+        @DelayRunTest(nDelayMs=10)
+        def f1(a):
+            listF1RunTimes[0] += 1
+            return a
+
+        listF1RunTimes = [0]
+        setTick = set()
+
+        for i in range(100):
+            nTickID = f1(1)
+            setTick.add(nTickID)
+        self.assertEqual(1, len(setTick))
+
+        sleep(0.05)
+        self.assertEqual(1, listF1RunTimes[0])
+
+        for i in range(100):
+            nTickID = f1(1)
+            setTick.add(nTickID)
+        self.assertEqual(2, len(setTick))
+
+        sleep(0.05)
+        self.assertEqual(2, listF1RunTimes[0])
+
+        for i in range(100, 110):
+            nTickID = f1(i)
+            setTick.add(nTickID)
+        self.assertEqual(12, len(setTick))
+
+        sleep(0.05)
+        self.assertEqual(12, listF1RunTimes[0])
+
+    def test2(self):
+        """延迟执行。不区分入参, 间隔时间内只执行一次"""
+
+        @DelayRunTest(nDelayMs=10, bUniqueArg=False)
+        def f1(a):
+            listF1RunTimes[0] += 1
+            return a
+
+        listF1RunTimes = [0]
+        setTick = set()
+
+        for i in range(10):
+            nTickID = f1(1)
+            setTick.add(nTickID)
+        self.assertEqual(1, len(setTick))
+
+        sleep(0.05)
+        self.assertEqual(1, listF1RunTimes[0])
+
+        for i in range(10, 20):
+            nTickID = f1(i)
+            setTick.add(nTickID)
+        self.assertEqual(2, len(setTick))
+
+        sleep(0.05)
+        self.assertEqual(2, listF1RunTimes[0])
+
+    def testUnRegister(self):
+        @DelayRunTest(nDelayMs=10)
+        def f1(a):
+            listF1RunTimes[0] += 1
+            return a
+
+        listF1RunTimes = [0]
+
+        nTickID = list(map(lambda i: f1(1), range(100)))[0]
+        tick_mgr.UnRegisterTick(nTickID)
+        sleep(0.05)
+        self.assertEqual(0, listF1RunTimes[0])
+
+        nTickID = list(map(lambda i: f1(1), range(100)))[0]
+        tick_mgr.UnRegisterTick(nTickID)
+        sleep(0.05)
+        self.assertEqual(0, listF1RunTimes[0])
+
+        list(map(lambda i: f1(1), range(100)))
+        sleep(0.05)
+        self.assertEqual(1, listF1RunTimes[0])
+
+        list(map(lambda i: f1(1), range(100)))
+        sleep(0.05)
+        self.assertEqual(2, listF1RunTimes[0])
