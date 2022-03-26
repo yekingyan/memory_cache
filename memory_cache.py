@@ -1,9 +1,39 @@
 # coding=utf-8
 import time
 from functools import wraps
+from collections import OrderedDict
 
 
 NEVER_EXPIRE = 0
+
+
+class LRUCache(object):
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.cache = OrderedDict()
+
+    def put(self, key, value):
+        if key in self.cache:
+            del self.cache[key]
+        elif len(self.cache) >= self.capacity:
+            self.cache.popitem(last=False)
+        self.cache[key] = value
+
+    def get(self, key, default=None):
+        if key not in self.cache:
+            return default
+        value = self.cache.pop(key)
+        self.put(key, value)
+        return value
+
+    def __setitem__(self, key, value):
+        self.put(key, value)
+
+    def __getitem__(self, key):
+        return self.get(key)
+
+    def __contains__(self, key):
+        return key in self.cache
 
 
 class FuncAttr(object):
@@ -37,6 +67,11 @@ class MemoryCache(FuncAttr):
     """
     函数缓存装饰器
     """
+
+    def __init__(self, nExpireMs=NEVER_EXPIRE, bUniqueArg=True, nSize=1024):
+        super(MemoryCache, self).__init__(nExpireMs, bUniqueArg)
+        self.dictArg2res = LRUCache(nSize)
+
     def __call__(self, func):
         @wraps(func)
         def Wrapper(*args, **kwargs):

@@ -30,6 +30,9 @@ def RegisterTick(_, nTickTime, CallBack, *tParam):
     return TimerObj
 
 
+RegisterNotFixTick = RegisterTick
+
+
 def RegisterOnceTick(_, nTickTime, CallBack, *tParam):
     TimerObj = Timer(nTickTime / 1000.0, CallBack, tParam)
     TimerObj.start()
