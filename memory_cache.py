@@ -53,14 +53,24 @@ class FuncAttr(object):
         result, nCacheExpireTs = self.dictArg2res.get(key, (None, None))
         return result, nCacheExpireTs
 
-    def _IsExpired(self, key):
-        _, nCacheExpireTs = self._GetRes(key)
+    def _IsExpired(self, key=None, nCacheExpireTs=None):
+        if nCacheExpireTs is None:
+            _, nCacheExpireTs = self._GetRes(key)
         if nCacheExpireTs is None:
             return True
         if self.m_nExpireMs == NEVER_EXPIRE:
             return False
         assert isinstance(nCacheExpireTs, (int, float))
         return time.time() >= nCacheExpireTs
+
+    def MakeKey(self, args, kwargs):
+        if not self.m_bUniqueArg:
+            return "simple"
+        key = args
+        if kwargs:
+            for item in kwargs.iteritems():
+                key += item
+        return key
 
 
 class MemoryCache(FuncAttr):
@@ -75,9 +85,9 @@ class MemoryCache(FuncAttr):
     def __call__(self, func):
         @wraps(func)
         def Wrapper(*args, **kwargs):
-            key = str((args, kwargs)) if self.m_bUniqueArg else "simple"
-            if not self._IsExpired(key):
-                result, _ = self._GetRes(key)
+            key = self.MakeKey(args, kwargs)
+            result, nCacheExpireTs = self._GetRes(key)
+            if not self._IsExpired(nCacheExpireTs=nCacheExpireTs):
                 return result
 
             if self.m_InstanceObj is not None:
@@ -101,9 +111,9 @@ class DelayRun(FuncAttr):
     def __call__(self, func):
         @wraps(func)
         def Wrapper(*args, **kwargs):
-            key = str((args, kwargs)) if self.m_bUniqueArg else "simple"
-            nTickID, _ = self._GetRes(key)
-            if not self._IsExpired(key) and self.m_TickEngine.IsExistTickID(nTickID):
+            key = self.MakeKey(args, kwargs)
+            nTickID, nCacheExpireTs = self._GetRes(key)
+            if not self._IsExpired(key, nCacheExpireTs=nCacheExpireTs) and self.m_TickEngine.IsExistTickID(nTickID):
                 return nTickID
 
             RegisterOnceTick = self.m_TickEngine.RegisterOnceTick
